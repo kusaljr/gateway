@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { ActivityIndicator, Text, View, Pressable, ScrollView, RefreshControl } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -10,7 +10,7 @@ import { MONO_FONT } from "../lib/fonts";
 import { useSession } from "../lib/session";
 
 export default function DevicesScreen() {
-  const { ready, user, devices, devicesLoaded, refreshDevices, tunnelUrl, tunnelChoices, choicesLoaded, pickTunnel, login, busy, magicStep, err, accountEmail, pickedTunnelId, clearPicked } = useSession();
+  const { ready, user, devices, devicesLoaded, refreshDevices, tunnelUrl, tunnelChoices, choicesLoaded, pickTunnel, login, busy, magicStep, err, accountEmail } = useSession();
   const [refreshing, setRefreshing] = useState(false);
 
   // Poll while the device list is on screen so a disconnect shows up on its
@@ -24,31 +24,27 @@ export default function DevicesScreen() {
     }, [refreshDevices, user])
   );
 
-  // Refresh means "ask again" either way: Cloudflare, when no device has been
-  // entered yet, or the device itself once one has.
-  // Choosing a device is a request to USE that machine, not just to sign in.
-  // Once its own device list has landed, open it — matched by tunnel id so the
-  // right one is picked even when the device reports several.
-  useEffect(() => {
-    if (!pickedTunnelId || !devicesLoaded) return;
-    const match = devices.find((d) => d.tunnel_id === pickedTunnelId) || (devices.length === 1 ? devices[0] : null);
-    clearPicked();
-    if (match) router.push({ pathname: "/device/[deviceId]", params: { deviceId: match.id } });
-  }, [pickedTunnelId, devicesLoaded, devices, clearPicked]);
-
-  // The machine already entered needs no second sign-in — open its projects.
-  // Any other row is a device this app has never authenticated against, so it
-  // goes through Access first and lands on the same place afterwards.
+  // Choosing a device is a request to USE that machine, so make it the active
+  // one and then open it — one await, one push.
+  //
+  // Navigating here rather than from an effect is the fix for "six back presses
+  // to leave a project list": the old version parked the chosen tunnel id in
+  // context and let an effect keyed on [pickedTunnelId, devicesLoaded, devices]
+  // do the pushing, and every state commit inside the sign-in it was waiting on
+  // re-ran that effect before the clear landed. Each run pushed the same route
+  // again.
+  //
+  // Switching first also stops a device screen from rendering a different
+  // machine's projects: every screen below reads the active session, so the
+  // active session has to be the device whose id is in the route. pickTunnel
+  // reuses the stored Access session for that hostname, so this is only a
+  // browser trip the first time.
   const onPick = useCallback(
-    (url: string, tunnelId: string) => {
-      const match = devices.find((d) => d.tunnel_id === tunnelId);
-      if (user && match) {
-        router.push({ pathname: "/device/[deviceId]", params: { deviceId: match.id } });
-        return;
-      }
-      pickTunnel(url, tunnelId);
+    async (url: string, tunnelId: string) => {
+      const match = await pickTunnel(url, tunnelId);
+      if (match) router.push({ pathname: "/device/[deviceId]", params: { deviceId: match.id } });
     },
-    [devices, user, pickTunnel]
+    [pickTunnel]
   );
 
   // Pull-to-refresh is the "show me what this account has" gesture, so it asks

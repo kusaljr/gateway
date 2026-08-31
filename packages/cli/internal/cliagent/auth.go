@@ -189,7 +189,7 @@ func Statuses() []Status {
 			continue
 		}
 		st := Status{Name: name, Label: labels[name], Bin: b.Bin()}
-		if path, err := exec.LookPath(b.Bin()); err == nil {
+		if path, err := lookPath(b.Bin()); err == nil {
 			st.Installed, st.Path = true, path
 			// only meaningful for something that can actually run
 			st.Auth, st.Source = probes[name].Check()

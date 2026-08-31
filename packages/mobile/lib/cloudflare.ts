@@ -60,15 +60,19 @@ const CF_OAUTH_HTTPS_REDIRECT = "https://kusallamsal.com.np/auth/kusal-callback"
 const CF_OAUTH_APP_REDIRECT = "kusal://auth";
 // Exact scopes registered on the client (Cloudflare dashboard → OAuth clients →
 // kusal) — account read, tunnel read/write, zone read/write, Access apps/policies
-// write, plus offline_access.
+// write.
 //
-// offline_access is the one that matters for how often this app asks to sign
-// in: it is what makes Cloudflare issue a refresh_token. Without it the
-// account token expired with nothing to renew it from, which is what the
-// comment on loginToCloudflareAccount used to describe as simply unavoidable.
-// refreshCloudflareAccountSession below has always been able to use one — it
-// just never received one.
-const CF_OAUTH_SCOPES = "account-settings.read argotunnel.read argotunnel.write zone.read zone.write zone-access.write user-details.read offline_access";
+// offline_access is deliberately absent. Asking for it does not merely fail to
+// return a refresh token, it breaks sign-in outright: Cloudflare answers the
+// authorize request with "OAuth 2.0 client is not allowed to request scope
+// offline_access" and renders that as a dead-end page, so the browser tab never
+// redirects back and the app sits on "Continue with Cloudflare" forever. The
+// scope has to be granted on the client itself in the dashboard before it can
+// be requested here. Until then the account token is short-lived with nothing
+// to renew it from, and refreshCloudflareAccountSession below never gets a
+// token to use. Keep this in sync with cfOAuthScopes in
+// packages/cli/internal/auth/oauth.go.
+const CF_OAUTH_SCOPES = "account-settings.read argotunnel.read argotunnel.write zone.read zone.write zone-access.write user-details.read";
 const CF_API_BASE = "https://api.cloudflare.com/client/v4";
 
 const PKCE_CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
@@ -87,11 +91,11 @@ export type CloudflareAccountSession = { accessToken: string; refreshToken: stri
 
 // Full PKCE Authorization Code flow against Cloudflare's self-managed OAuth.
 //
-// The scopes now include offline_access, so Cloudflare returns a refresh token
-// and this session renews without a browser. The device list is still cached
-// rather than re-fetched on every launch — signing into a device uses the
-// separate Access flow, so even a dead account token must never stand between
-// the user and a machine they already know about.
+// Without offline_access (see CF_OAUTH_SCOPES) Cloudflare returns no refresh
+// token, so this session simply dies when its access token expires. The device
+// list is cached rather than re-fetched on every launch — signing into a device
+// uses the separate Access flow, so even a dead account token must never stand
+// between the user and a machine they already know about.
 export async function loginToCloudflareAccount(): Promise<CloudflareAccountSession> {
   const verifier = await randomPkceString(64);
   const challengeB64 = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, verifier, {

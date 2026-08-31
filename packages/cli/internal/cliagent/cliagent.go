@@ -20,7 +20,9 @@ package cliagent
 import (
 	"bufio"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -245,8 +247,33 @@ func Installed() []Backend {
 }
 
 func IsInstalled(b Backend) bool {
-	_, err := exec.LookPath(b.Bin())
+	_, err := lookPath(b.Bin())
 	return err == nil
+}
+
+// lookPath is exec.LookPath but also probes the user-local dirs that a
+// systemd/launchd daemon never inherits from ~/.bashrc — ~/.opencode/bin
+// (opencode's installer), ~/.local/bin (claude, pipx), ~/bin and
+// ~/.npm-global/bin — so the provider inventory doesn't report "not
+// installed" for a CLI the user plainly has.
+func lookPath(bin string) (string, error) {
+	if p, err := exec.LookPath(bin); err == nil {
+		return p, nil
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		for _, dir := range []string{
+			filepath.Join(home, ".opencode", "bin"),
+			filepath.Join(home, ".local", "bin"),
+			filepath.Join(home, "bin"),
+			filepath.Join(home, ".npm-global", "bin"),
+		} {
+			cand := filepath.Join(dir, bin)
+			if st, err := os.Stat(cand); err == nil && !st.IsDir() && st.Mode().Perm()&0111 != 0 {
+				return cand, nil
+			}
+		}
+	}
+	return "", exec.ErrNotFound
 }
 
 // ── model list caching ─────────────────────────────────────────────────────
@@ -376,7 +403,11 @@ func Run(b Backend, sessionID, cwd, model, conversationID, text string, prior []
 // runExec is the one-shot path: spawn, read NDJSON off stdout, fold each line.
 // It returns the stderr tail so a silent failure can still be reported.
 func runExec(b ExecBackend, cwd, model, conversationID, text string, t *Transcript, flush func()) (string, error) {
-	cmd := exec.Command(b.Bin(), b.Args(model, conversationID, text)...)
+	bin := b.Bin()
+	if p, err := lookPath(bin); err == nil {
+		bin = p
+	}
+	cmd := exec.Command(bin, b.Args(model, conversationID, text)...)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}

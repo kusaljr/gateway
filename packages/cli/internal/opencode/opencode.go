@@ -4,15 +4,37 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 )
 
 // Detect if opencode is installed
 func IsInstalled() bool {
-	_, err := exec.LookPath("opencode")
+	_, err := lookPath("opencode")
 	return err == nil
+}
+
+func lookPath(bin string) (string, error) {
+	if p, err := exec.LookPath(bin); err == nil {
+		return p, nil
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		for _, dir := range []string{
+			filepath.Join(home, ".opencode", "bin"),
+			filepath.Join(home, ".local", "bin"),
+			filepath.Join(home, "bin"),
+			filepath.Join(home, ".npm-global", "bin"),
+		} {
+			cand := filepath.Join(dir, bin)
+			if st, err := os.Stat(cand); err == nil && !st.IsDir() && st.Mode().Perm()&0111 != 0 {
+				return cand, nil
+			}
+		}
+	}
+	return "", exec.ErrNotFound
 }
 
 const baseURL = "http://127.0.0.1:4096"
@@ -68,7 +90,11 @@ func EnsureRunning(cwd string) error {
 	if healthy() {
 		return nil
 	}
-	cmd := exec.Command("opencode", "serve", "--port", "4096", "--hostname", "127.0.0.1")
+	bin := "opencode"
+	if p, err := lookPath(bin); err == nil {
+		bin = p
+	}
+	cmd := exec.Command(bin, "serve", "--port", "4096", "--hostname", "127.0.0.1")
 	if cwd != "" {
 		cmd.Dir = cwd
 	}

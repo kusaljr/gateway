@@ -15,6 +15,15 @@ export const STORAGE_CF_ACCOUNT_REFRESH = "kusal:cf_account_refresh";
 // this every app start had nothing to show and fell back to the login screen —
 // even though entering a device needs the Access flow, not the account one.
 export const STORAGE_TUNNEL_CHOICES = "kusal:tunnel_choices";
+// One Access session per hostname, as a JSON map keyed by tunnel URL:
+// { "https://host": { token, cfJwt, email } }. Cloudflare Access issues its
+// JWT per hostname, so a single slot (STORAGE_TOKEN/STORAGE_CF_JWT above) meant
+// entering device B overwrote device A's credentials — and going back to A had
+// to run the whole Access flow again, every time, forever. Those two keys are
+// still written, but only as "which device is active now"; this map is what
+// makes switching free. Entries are dropped when they stop verifying.
+export const STORAGE_SESSIONS = "kusal:sessions";
+
 // Set when the user signs out on purpose. Bootstrap re-logs in silently when a
 // stored session has merely expired, and without this marker it cannot tell
 // that case apart from a deliberate sign-out — Cloudflare Access still holds

@@ -858,9 +858,29 @@ func (s *Server) handleProviders(w http.ResponseWriter, _ *http.Request) {
 // auth.json under the data dir, current ones keep them in opencode.db, and a
 // database we don't own is not something to guess about — "unknown" beats
 // telling someone to log in again.
+func shellLookPath(bin string) (string, error) {
+	if p, err := exec.LookPath(bin); err == nil {
+		return p, nil
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		for _, dir := range []string{
+			filepath.Join(home, ".opencode", "bin"),
+			filepath.Join(home, ".local", "bin"),
+			filepath.Join(home, "bin"),
+			filepath.Join(home, ".npm-global", "bin"),
+		} {
+			cand := filepath.Join(dir, bin)
+			if st, err := os.Stat(cand); err == nil && !st.IsDir() && st.Mode().Perm()&0111 != 0 {
+				return cand, nil
+			}
+		}
+	}
+	return "", exec.ErrNotFound
+}
+
 func opencodeStatus() cliagent.Status {
 	st := cliagent.Status{Name: "opencode", Label: "opencode", Bin: "opencode"}
-	path, err := exec.LookPath(st.Bin)
+	path, err := shellLookPath(st.Bin)
 	if err != nil {
 		return st
 	}

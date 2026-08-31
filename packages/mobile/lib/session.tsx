@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
 import { authHeaders, normalizeUrl } from "./net";
-import { Storage, STORAGE_CF_ACCOUNT_REFRESH, STORAGE_CF_ACCOUNT_TOKEN, STORAGE_CF_JWT, STORAGE_EMAIL, STORAGE_SIGNED_OUT, STORAGE_TOKEN, STORAGE_TUNNEL, STORAGE_TUNNEL_CHOICES } from "./storage";
+import { Storage, STORAGE_CF_ACCOUNT_REFRESH, STORAGE_CF_ACCOUNT_TOKEN, STORAGE_CF_JWT, STORAGE_EMAIL, STORAGE_SESSIONS, STORAGE_SIGNED_OUT, STORAGE_TOKEN, STORAGE_TUNNEL, STORAGE_TUNNEL_CHOICES } from "./storage";
 import { fetchDevices, fetchMe, probeTunnel, storedTunnelUrl, TunnelUnreachableError, verifyKusalBackend } from "./tunnel";
 import { cloudflareAccountEmail, getTunnelRoutes, listCloudflareTunnels, loginToCloudflareAccount, loginViaCloudflareAccess, refreshCloudflareAccountSession, type CloudflareAccountSession } from "./cloudflare";
 import type { Auth, AuthUser, Device } from "./api";
@@ -59,6 +59,37 @@ export type TunnelChoice = {
   service: string;
 };
 
+// ── one Access session per hostname ────────────────────────────────────────
+// Access hands out a JWT scoped to the hostname it was obtained for, so there
+// is no such thing as "the" session once more than one device is paired. These
+// live in STORAGE_SESSIONS keyed by tunnel URL; the single-slot keys still say
+// which one is active.
+type StoredSession = { token: string; cfJwt: string; email: string };
+
+async function readSessions(): Promise<Record<string, StoredSession>> {
+  try {
+    const raw = await Storage.getItem(STORAGE_SESSIONS);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, StoredSession>) : {};
+  } catch {
+    return {};
+  }
+}
+
+async function rememberSession(url: string, s: StoredSession) {
+  const all = await readSessions();
+  all[url] = s;
+  await Storage.setItem(STORAGE_SESSIONS, JSON.stringify(all));
+}
+
+async function forgetSession(url: string) {
+  const all = await readSessions();
+  if (!(url in all)) return;
+  delete all[url];
+  await Storage.setItem(STORAGE_SESSIONS, JSON.stringify(all));
+}
+
 type SessionValue = {
   // bootstrap (restore stored session / discover a tunnel) has finished
   ready: boolean;
@@ -78,9 +109,6 @@ type SessionValue = {
   magicStep: string | null;
   // the Cloudflare ACCOUNT the app is signed into, before any device is entered
   accountEmail: string;
-  // set by pickTunnel: the tunnel just entered, cleared once acted on
-  pickedTunnelId: string | null;
-  clearPicked: () => void;
   err: string | null;
   // set when a Cloudflare account holds more than one live kusal tunnel —
   // the login screen asks which device to sign into
@@ -90,7 +118,12 @@ type SessionValue = {
   // discover: true forces the account listing (the device chooser). Without it,
   // signing in takes the fast path into the machine already paired.
   login: (opts?: { silent?: boolean; discover?: boolean }) => Promise<void>;
-  pickTunnel: (url: string, tunnelId?: string) => Promise<void>;
+  // Resolves to the device the caller should open, or null if the sign-in
+  // failed. Returning it is deliberate: this used to park the id in state for
+  // the device list to notice and navigate from an effect, and that effect
+  // re-ran on every state commit of the login it was waiting for — six commits,
+  // six pushes of the same route, six back presses to escape.
+  pickTunnel: (url: string, tunnelId?: string) => Promise<Device | null>;
   logout: () => Promise<void>;
 };
 
@@ -113,7 +146,6 @@ export function SessionProvider({ children }: PropsWithChildren) {
   const [busy, setBusy] = useState(false);
   const [magicStep, setMagicStep] = useState<string | null>(null);
   const [accountEmail, setAccountEmail] = useState("");
-  const [pickedTunnelId, setPickedTunnelId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [tunnelChoices, setTunnelChoices] = useState<TunnelChoice[] | null>(null);
   // whether anything has finished looking for tunnels yet — separate from
@@ -142,7 +174,9 @@ export function SessionProvider({ children }: PropsWithChildren) {
   }, [tunnelUrl, token, cfJwt]);
 
   // Real Cloudflare Access login against a known hostname, then load devices.
-  const performAccessLogin = useCallback(async (url: string) => {
+  // Returns the device list so the caller can decide where to go without
+  // waiting for a state round-trip.
+  const performAccessLogin = useCallback(async (url: string): Promise<Device[]> => {
     setMagicStep("Sign in with Cloudflare…");
     const res = await loginViaCloudflareAccess(url);
     if (!res.cfJwt) throw new Error("Cloudflare Access login succeeded but returned no JWT — check the backend build is up to date.");
@@ -160,6 +194,8 @@ export function SessionProvider({ children }: PropsWithChildren) {
     await Storage.setItem(STORAGE_EMAIL, res.email);
     await Storage.setItem(STORAGE_CF_JWT, res.cfJwt);
     await Storage.setItem(STORAGE_TUNNEL, url);
+    // and keep it under this hostname, so coming back here later costs nothing
+    await rememberSession(url, { token: res.token, cfJwt: res.cfJwt, email: res.email });
     setTunnelUrl(url);
     setToken(res.token);
     setCfJwt(res.cfJwt);
@@ -169,6 +205,39 @@ export function SessionProvider({ children }: PropsWithChildren) {
     const list = await fetchDevices(url, res.token, res.cfJwt);
     setDevices(list);
     setDevicesLoaded(true);
+    return list;
+  }, []);
+
+  // Make `url` the active device using the Access session already stored for
+  // that hostname. Returns its device list, or null when there is nothing
+  // usable stored — which is the only case that needs a browser.
+  const activateStoredSession = useCallback(async (url: string): Promise<Device[] | null> => {
+    const stored = (await readSessions())[url];
+    if (!stored?.token || !stored?.cfJwt) return null;
+    try {
+      // The JWT outlives the app but not the Access Application's session,
+      // and the device behind it can be gone entirely. Verifying here is what
+      // keeps a stale entry from turning into a screen full of failed requests.
+      await verifyKusalBackend(url, stored.token, stored.cfJwt);
+    } catch {
+      await forgetSession(url);
+      return null;
+    }
+    await Storage.setItem(STORAGE_TOKEN, stored.token);
+    await Storage.setItem(STORAGE_CF_JWT, stored.cfJwt);
+    await Storage.setItem(STORAGE_EMAIL, stored.email);
+    await Storage.setItem(STORAGE_TUNNEL, url);
+    setTunnelUrl(url);
+    setToken(stored.token);
+    setCfJwt(stored.cfJwt);
+    setUser({ email: stored.email, provider: "cloudflare" });
+    let list: Device[] = [];
+    try {
+      list = await fetchDevices(url, stored.token, stored.cfJwt);
+    } catch {}
+    setDevices(list);
+    setDevicesLoaded(true);
+    return list;
   }, []);
 
   // The account session is remembered and renewed, in that order: a stored
@@ -400,7 +469,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
     }
   }, [cloudflareAccount, performAccessLogin, restoreCachedChoices]);
 
-  const pickTunnel = useCallback(async (url: string, tunnelId?: string) => {
+  const pickTunnel = useCallback(async (url: string, tunnelId?: string): Promise<Device | null> => {
     setBusy(true);
     setErr(null);
     // The list deliberately stays up. Clearing it here left the main screen
@@ -410,17 +479,23 @@ export function SessionProvider({ children }: PropsWithChildren) {
     // that device found an empty list. busy already disables the rows.
     await Storage.removeItem(STORAGE_SIGNED_OUT);
     try {
-      await performAccessLogin(url);
-      // signing in was a means to an end: the caller opens this machine rather
-      // than dropping the user back on the list they just chose from
-      if (tunnelId) setPickedTunnelId(tunnelId);
+      // A hostname this app has already been through Access for needs no
+      // browser and no second Access round trip — switching to it is a
+      // storage read and a health check.
+      setMagicStep("Opening…");
+      const list = (await activateStoredSession(url)) ?? (await performAccessLogin(url));
+      // signing in was a means to an end: hand back the machine to open rather
+      // than dropping the user on the list they just chose from
+      if (!tunnelId) return list.length === 1 ? list[0] : null;
+      return list.find((d) => d.tunnel_id === tunnelId) || (list.length === 1 ? list[0] : null);
     } catch (e: any) {
       setErr(e.message ? String(e.message).slice(0, 300) : "Could not sign in.");
+      return null;
     } finally {
       setMagicStep(null);
       setBusy(false);
     }
-  }, [performAccessLogin]);
+  }, [activateStoredSession, performAccessLogin]);
 
   const logout = useCallback(async () => {
     try {
@@ -429,6 +504,9 @@ export function SessionProvider({ children }: PropsWithChildren) {
     await Storage.removeItem(STORAGE_TOKEN);
     await Storage.removeItem(STORAGE_CF_JWT);
     await Storage.removeItem(STORAGE_EMAIL);
+    // every per-hostname session too — signing out of one device while the
+    // others stayed silently enterable is not what the button says
+    await Storage.removeItem(STORAGE_SESSIONS);
     // remembered across restarts: the next launch must land on the login
     // screen and wait to be asked, not re-authenticate on its own
     await Storage.setItem(STORAGE_SIGNED_OUT, "1");
@@ -541,8 +619,6 @@ export function SessionProvider({ children }: PropsWithChildren) {
     if (user && token && tunnelUrl) refreshDevices();
   }, [user, token, tunnelUrl, refreshDevices]);
 
-  const clearPicked = useCallback(() => setPickedTunnelId(null), []);
-
   const deviceById = useCallback((id: string) => devices.find((d) => d.id === id), [devices]);
 
   const value = useMemo<SessionValue>(
@@ -561,15 +637,13 @@ export function SessionProvider({ children }: PropsWithChildren) {
       busy,
       magicStep,
       accountEmail,
-      pickedTunnelId,
-      clearPicked,
       err,
       tunnelChoices,
       login,
       pickTunnel,
       logout,
     }),
-    [ready, tunnelUrl, user, token, cfJwt, auth, devices, devicesLoaded, deviceById, refreshDevices, busy, magicStep, accountEmail, pickedTunnelId, clearPicked, err, tunnelChoices, choicesLoaded, login, pickTunnel, logout]
+    [ready, tunnelUrl, user, token, cfJwt, auth, devices, devicesLoaded, deviceById, refreshDevices, busy, magicStep, accountEmail, err, tunnelChoices, choicesLoaded, login, pickTunnel, logout]
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

@@ -26,13 +26,15 @@ const (
 	// Exact scopes registered on the client — omitting `scope` grants zero
 	// permissions (verified empirically), so this must be listed explicitly.
 	//
-	// offline_access is what makes Cloudflare return a refresh_token at all.
-	// Without it every dashboard token simply died with nothing to renew it
-	// from: the refresh plumbing on both the CLI and the app was complete and
-	// correct, and never once had a token to use, so a dead access token always
-	// meant another browser sign-in. Verified on a live install — the stored
-	// token answered 403 and cf_refresh_token was empty.
-	cfOAuthScopes       = "account-settings.read argotunnel.read argotunnel.write zone.read zone.write zone-access.write user-details.read offline_access"
+	// offline_access is deliberately absent: this client is not registered for
+	// it, and asking anyway fails the authorize request outright with "OAuth
+	// 2.0 client is not allowed to request scope offline_access" — no code, no
+	// redirect back, sign-in dead. Cost of leaving it out: Cloudflare returns
+	// no refresh_token, so the refresh plumbing here and in the app has nothing
+	// to use and a dead access token means another browser sign-in. Grant the
+	// scope on the OAuth client in the dashboard first, then add it here and in
+	// CF_OAUTH_SCOPES (packages/mobile/lib/cloudflare.ts) together.
+	cfOAuthScopes       = "account-settings.read argotunnel.read argotunnel.write zone.read zone.write zone-access.write user-details.read"
 	cfOAuthRedirectURI  = "http://127.0.0.1:41830/callback"
 	cfOAuthCallbackAddr = "127.0.0.1:41830"
 	CFAPIBase           = "https://api.cloudflare.com/client/v4"
