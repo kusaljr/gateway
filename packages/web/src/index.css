@@ -1,0 +1,241 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   kusal — light theme, tokens mirrored from t3code (apps/web/src/index.css).
+   Light only: one palette, no dark variant, `color-scheme: light`.
+--------------------------------------------------------------------------- */
+
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@theme inline {
+  --color-zinc-25: oklch(99.2% 0 0);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-secondary-label: var(--secondary-label);
+  --color-placeholder: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-message: var(--message-surface);
+  --color-message-foreground: var(--foreground);
+  --color-message-action: var(--primary);
+  --color-message-action-foreground: var(--primary-foreground);
+  --color-message-action-hover: var(--message-action-hover);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-control: var(--sidebar-control-surface);
+  --color-sidebar-row-hover: var(--sidebar-row-hover);
+  --color-sidebar-row-selected: var(--sidebar-row-selected);
+
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-error: var(--error);
+  --color-error-foreground: var(--error-foreground);
+
+  --radius-control: var(--control-radius);
+
+  --animate-status-pulse: status-pulse 2s infinite;
+}
+
+:root {
+  color-scheme: light;
+
+  --radius: 0.625rem;
+  --control-radius: 0.5rem;
+  --glass-blur: 12px;
+  --glass-opacity: 80%;
+  --glass-saturation: 1.14;
+  --topbar-height: 52px;
+  --app-scrollbar-thumb: rgb(217 217 217);
+  --app-scrollbar-thumb-hover: rgb(191 191 191);
+
+  --background: var(--color-zinc-25);
+  --foreground: var(--color-zinc-800);
+  --card: var(--color-white);
+  --popover: var(--color-white);
+  --primary: oklch(0.488 0.217 264);
+  --primary-foreground: var(--color-white);
+  --secondary: var(--color-zinc-50);
+  --muted: var(--color-zinc-50);
+  --muted-foreground: var(--color-zinc-500);
+  --secondary-label: var(--color-zinc-500);
+  --accent: var(--color-zinc-100);
+  --accent-foreground: var(--color-zinc-900);
+  --border: var(--color-zinc-200);
+  --input: var(--color-zinc-300);
+  --ring: var(--primary);
+
+  --message-surface: var(--accent);
+  --message-action-hover: color-mix(in srgb, var(--primary) 90%, var(--background));
+
+  --sidebar: var(--color-zinc-50);
+  --sidebar-control-surface: var(--color-zinc-100);
+  --sidebar-row-hover: var(--color-zinc-25);
+  --sidebar-row-selected: var(--color-white);
+
+  --success: var(--color-emerald-500);
+  --success-foreground: var(--color-emerald-700);
+  --info: var(--color-blue-500);
+  --info-foreground: var(--color-blue-700);
+  --warning: var(--color-amber-500);
+  --warning-foreground: var(--color-amber-700);
+  --error: var(--color-red-500);
+  --error-foreground: var(--color-red-700);
+
+  --code-background: color-mix(in srgb, var(--card) 90%, var(--background));
+  --terminal-background: var(--background);
+  --terminal-foreground: var(--foreground);
+}
+
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--app-scrollbar-thumb) transparent;
+  }
+  *::-webkit-scrollbar { width: 6px; height: 6px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb { background: var(--app-scrollbar-thumb); border-radius: 999px; }
+  *::-webkit-scrollbar-thumb:hover { background: var(--app-scrollbar-thumb-hover); }
+
+  html, body, #root { height: 100%; }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  code, pre, kbd { font-family: var(--font-mono); }
+}
+
+/* Palette / dialog chrome, ported from t3code's dialog-glass + dialog-backdrop utilities. */
+@utility dialog-glass {
+  background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  border-color: color-mix(in srgb, var(--foreground) 10%, transparent);
+  box-shadow: 0 24px 64px -24px rgb(0 0 0 / 30%);
+
+  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    background: var(--popover);
+  }
+}
+
+@utility dialog-backdrop {
+  background: color-mix(in srgb, var(--background) 60%, transparent);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+@layer components {
+  /* Composer surface: frosted card, same recipe as t3code's chat composer. */
+  .glass-surface {
+    background: color-mix(in srgb, var(--card) var(--glass-opacity), transparent);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  }
+
+  /* Fade the timeline out under the composer instead of cutting it. */
+  .timeline-fade {
+    mask-image: linear-gradient(to bottom, transparent 0, black 12px, black calc(100% - 8px), transparent 100%);
+  }
+
+  /* Markdown for assistant messages — replaces the typography plugin. */
+  .chat-md {
+    font-size: 0.875rem;
+    line-height: 1.65;
+    color: var(--foreground);
+    overflow-wrap: break-word;
+  }
+  .chat-md > :first-child { margin-top: 0; }
+  .chat-md > :last-child { margin-bottom: 0; }
+  .chat-md p { margin: 0.5rem 0; }
+  .chat-md h1, .chat-md h2, .chat-md h3, .chat-md h4 {
+    margin: 1.1rem 0 0.5rem;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+  }
+  .chat-md h1 { font-size: 1.125rem; }
+  .chat-md h2 { font-size: 1rem; }
+  .chat-md h3 { font-size: 0.9375rem; }
+  .chat-md h4 { font-size: 0.875rem; }
+  .chat-md ul, .chat-md ol { margin: 0.5rem 0; padding-inline-start: 1.25rem; }
+  .chat-md ul { list-style: disc; }
+  .chat-md ol { list-style: decimal; }
+  .chat-md li { margin: 0.2rem 0; }
+  .chat-md li::marker { color: var(--muted-foreground); }
+  .chat-md a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+  .chat-md strong { font-weight: 600; color: var(--accent-foreground); }
+  .chat-md hr { margin: 1rem 0; border: 0; border-top: 1px solid var(--border); }
+  .chat-md blockquote {
+    margin: 0.6rem 0;
+    padding-inline-start: 0.75rem;
+    border-inline-start: 2px solid var(--border);
+    color: var(--muted-foreground);
+  }
+  .chat-md :not(pre) > code {
+    padding: 0.1rem 0.3rem;
+    border-radius: 0.3rem;
+    border: 1px solid var(--border);
+    background: var(--secondary);
+    font-size: 0.8125em;
+  }
+  .chat-md pre {
+    margin: 0.65rem 0;
+    padding: 0.7rem 0.8rem;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--secondary);
+    font-size: 0.78125rem;
+    line-height: 1.55;
+  }
+  .chat-md pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+  .chat-md table {
+    margin: 0.65rem 0;
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+  }
+  .chat-md th, .chat-md td {
+    border: 1px solid var(--border);
+    padding: 0.3rem 0.55rem;
+    text-align: start;
+  }
+  .chat-md th { background: var(--secondary); font-weight: 600; }
+  .chat-md img { max-width: 100%; border-radius: var(--radius); }
+}
+
+@keyframes status-pulse {
+  0%, 45% { opacity: 1; }
+  60%, 100% { opacity: 0.35; }
+}
+
+/* xterm — light terminal, matching t3code's light --terminal-* tokens */
+.xterm { height: 100%; padding: 4px 6px; }
+.xterm-viewport::-webkit-scrollbar { width: 6px; }

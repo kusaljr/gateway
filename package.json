@@ -1,0 +1,24 @@
+{
+  "name": "kusal",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.12.3",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "dev": "npm --prefix packages/web run dev",
+    "dev:web": "npm --prefix packages/web run dev",
+    "dev:mobile": "npm --prefix packages/mobile run start",
+    "dev:cli": "go run ./packages/cli --help",
+    "android": "npm --prefix packages/mobile run android",
+    "android:run": "npm --prefix packages/mobile run android:run",
+    "build": "npm --prefix packages/web run build",
+    "build:web": "npm --prefix packages/web run build",
+    "build:mobile": "npm --prefix packages/mobile run export -- --platform android",
+    "build:cli": "go build -o bin/kusal ./packages/cli",
+    "install:cli": "go build -o bin/kusal ./packages/cli && cp bin/kusal ~/bin/kusal || sudo install -m 755 bin/kusal /usr/local/bin/kusal",
+    "vet": "go vet ./packages/cli/...",
+    "tidy": "cd packages/cli && go mod tidy",
+    "clean": "rm -rf bin packages/web/dist"
+  }
+}

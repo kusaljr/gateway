@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Kusal",
+    "slug": "kusal",
+    "version": "1.0.0",
+    "scheme": "kusal",
+    "orientation": "portrait",
+    "icon": "./assets/kusal-icon-v2.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.kusal.mobile",
+      "softwareKeyboardLayoutMode": "resize",
+      "adaptiveIcon": {
+        "backgroundColor": "#000000",
+        "foregroundImage": "./assets/kusal-android-foreground-v2.png",
+        "monochromeImage": "./assets/kusal-android-monochrome-v2.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/kusal-favicon-v2.png"
+    },
+    "plugins": [
+      "expo-web-browser",
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FFFFFF",
+          "image": "./assets/kusal-wordmark.png",
+          "imageWidth": 240,
+          "resizeMode": "contain"
+        }
+      ]
+    ]
+  }
+}
