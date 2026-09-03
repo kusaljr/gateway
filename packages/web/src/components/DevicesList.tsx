@@ -93,6 +93,9 @@ export function DevicesList({ onRefresh }: { onRefresh?: () => void }) {
 function DeviceCard({ d, online }: { d: Device; online?: boolean }) {
   const shortTunnel = d.tunnel_id ? `${d.tunnel_id.slice(0, 10)}…` : "—";
   const tryCopy = (v: string) => navigator.clipboard?.writeText(v);
+  const isCurrent = typeof window !== "undefined" && (d.hostname === window.location.hostname || (d.hostname.includes("localhost") && window.location.hostname === "localhost"));
+  const isRemote = online && d.hostname && !isCurrent && d.hostname.includes(".");
+
   return (
     <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-3.5 shadow-sm">
       <div className={`flex size-9 shrink-0 items-center justify-center rounded-full ${online ? "bg-success/10 text-success-foreground" : "bg-muted text-muted-foreground"}`}>
@@ -101,6 +104,7 @@ function DeviceCard({ d, online }: { d: Device; online?: boolean }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium text-foreground">{d.name || d.hostname || d.id.slice(0, 8)}</span>
+          {isCurrent && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">(this device)</span>}
           <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${online ? "bg-success/10 text-success-foreground" : "bg-muted text-muted-foreground"}`}>
             <span className={`size-1.5 rounded-full ${online ? "bg-success animate-status-pulse" : "bg-border"}`} />{d.status}
           </span>
@@ -115,8 +119,19 @@ function DeviceCard({ d, online }: { d: Device; online?: boolean }) {
           <span className="inline-flex items-center gap-1"><Clock className="size-3" />{relativeTime(d.last_seen)}</span>
         </div>
       </div>
-      <div className="hidden shrink-0 flex-col items-end gap-1 sm:flex">
-        <span className="rounded bg-orange-500/10 px-2 py-1 font-mono text-[10px] text-orange-700">{d.id.slice(0, 8)}</span>
+      <div className="hidden shrink-0 flex-col items-end gap-1.5 sm:flex">
+        {isRemote ? (
+          <a
+            href={`https://${d.hostname}`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 rounded-md bg-orange-500/10 px-2.5 py-1 text-xs font-medium text-orange-700 hover:bg-orange-500/20"
+          >
+            Open <ExternalLink className="size-3" />
+          </a>
+        ) : (
+          <span className="rounded bg-orange-500/10 px-2 py-1 font-mono text-[10px] text-orange-700">{d.id.slice(0, 8)}</span>
+        )}
         <span className="text-[10px] text-muted-foreground">tunnel · secure</span>
       </div>
     </div>

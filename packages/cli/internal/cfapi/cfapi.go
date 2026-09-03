@@ -84,6 +84,76 @@ func DeleteTunnel(token, accountID, tunnelID string) error {
 	return err
 }
 
+type Account struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// ListAccounts returns the Cloudflare accounts accessible with this token.
+func ListAccounts(token string) ([]Account, error) {
+	raw, err := doRequest(token, http.MethodGet, "/accounts?per_page=50", nil)
+	if err != nil {
+		return nil, err
+	}
+	var accounts []Account
+	if err := json.Unmarshal(raw, &accounts); err != nil {
+		return nil, fmt.Errorf("could not parse accounts list: %w", err)
+	}
+	return accounts, nil
+}
+
+type Tunnel struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Status          string `json:"status"`
+	CreatedAt       string `json:"created_at"`
+	ConnsActiveAt   string `json:"conns_active_at"`
+	ConnsInactiveAt string `json:"conns_inactive_at"`
+	Connections     []struct {
+		ColoName      string `json:"colo_name"`
+		ClientVersion string `json:"client_version"`
+		OpenedAt      string `json:"opened_at"`
+	} `json:"connections"`
+}
+
+// ListTunnels returns all non-deleted tunnels on the given account.
+func ListTunnels(token, accountID string) ([]Tunnel, error) {
+	raw, err := doRequest(token, http.MethodGet, fmt.Sprintf("/accounts/%s/cfd_tunnel?is_deleted=false&per_page=50", accountID), nil)
+	if err != nil {
+		return nil, err
+	}
+	var tunnels []Tunnel
+	if err := json.Unmarshal(raw, &tunnels); err != nil {
+		return nil, fmt.Errorf("could not parse tunnels list: %w", err)
+	}
+	return tunnels, nil
+}
+
+// GetTunnelHostnames returns public hostnames configured in this tunnel's ingress rules.
+func GetTunnelHostnames(token, accountID, tunnelID string) ([]string, error) {
+	raw, err := doRequest(token, http.MethodGet, fmt.Sprintf("/accounts/%s/cfd_tunnel/%s/configurations", accountID, tunnelID), nil)
+	if err != nil {
+		return nil, err
+	}
+	var cfg struct {
+		Config struct {
+			Ingress []struct {
+				Hostname string `json:"hostname"`
+			} `json:"ingress"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return nil, fmt.Errorf("could not parse tunnel configurations: %w", err)
+	}
+	var hostnames []string
+	for _, ing := range cfg.Config.Ingress {
+		if ing.Hostname != "" {
+			hostnames = append(hostnames, ing.Hostname)
+		}
+	}
+	return hostnames, nil
+}
+
 // DeleteDNSRecord removes the CNAME that points hostname at the tunnel. Reports
 // whether a record was actually there: "nothing to delete" is a normal outcome
 // (never routed, or already cleaned up) and must not read as a failure.

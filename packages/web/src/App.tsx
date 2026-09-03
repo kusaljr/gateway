@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
+import { UsageView } from "@/components/UsageView";
 import { Terminal, type TerminalStatus } from "@/components/Terminal";
 import { ProjectPicker } from "@/components/ProjectPicker";
 import { PreviewPane } from "@/components/panels/PreviewPane";
@@ -27,6 +28,30 @@ const TAB_META: Record<TabType, { label: string; icon: typeof Globe }> = {
 };
 
 export default function App() {
+  const [route, setRoute] = useState<"chat" | "usage">(() => {
+    if (typeof window !== "undefined" && window.location.pathname.startsWith("/usage")) {
+      return "usage";
+    }
+    return "chat";
+  });
+
+  const navigate = useCallback((target: "chat" | "usage") => {
+    setRoute(target);
+    const targetUrl = target === "usage" ? "/usage" : "/";
+    if (typeof window !== "undefined" && window.location.pathname !== targetUrl) {
+      window.history.pushState(null, "", targetUrl);
+    }
+  }, []);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const isUsage = window.location.pathname.startsWith("/usage");
+      setRoute(isUsage ? "usage" : "chat");
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
   const [activeId, setActiveId] = useState<string | null>(() => {
     try { return localStorage.getItem(ACTIVE_ID_KEY); } catch { return null; }
   });
@@ -89,7 +114,8 @@ export default function App() {
     setActiveId(null);
     setProjects((prev) => (prev.some((p) => p.id === project.id || p.path === project.path) ? prev : [project, ...prev]));
     setPickerOpen(false);
-  }, []);
+    navigate("chat");
+  }, [navigate]);
 
   const startDraftInPath = useCallback(async (cwd: string) => {
     const known = projects.find((p) => p.path === cwd);
@@ -104,6 +130,7 @@ export default function App() {
   // when ChatView creates a real opencode session: select it + refresh sidebar
   const onSessionCreated = (id: string) => {
     setActiveId(id);
+    navigate("chat");
     setSessionsRefresh((n) => n + 1);
   };
 
@@ -168,15 +195,23 @@ export default function App() {
         <ResizablePanel panelRef={leftRef} defaultSize="16" minSize="11" maxSize="35" collapsible collapsedSize={0} className="min-w-0">
           <Sidebar
             activeId={activeId}
-            onSelect={setActiveId}
+            onSelect={(id) => {
+              setActiveId(id);
+              navigate("chat");
+            }}
             refreshSignal={sessionsRefresh}
-            onNewThread={() => setPickerOpen(true)}
+            onNewThread={() => {
+              setPickerOpen(true);
+              navigate("chat");
+            }}
             onNewThreadIn={startDraftInPath}
             terminalLive={terminalLive}
             onThreadRemoved={(id) => {
               if (activeId === id) setActiveId(null);
               setSessionsRefresh((n) => n + 1);
             }}
+            currentView={route}
+            onNavigate={navigate}
           />
         </ResizablePanel>
 
@@ -184,70 +219,78 @@ export default function App() {
 
         {/* Center */}
         <ResizablePanel defaultSize="60" minSize="30" className="min-w-0">
-          <div className="flex h-full min-w-0 flex-col">
-            <div className="flex h-[52px] shrink-0 items-center gap-2 px-3">
-              <button
-                onClick={toggleLeft}
-                title={leftCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-                className="rounded-control p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                {leftCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
-              </button>
-
-              <span className="rounded-control bg-muted px-2 py-1 font-mono text-[11px] text-foreground">kusal/harness</span>
-              <span className="flex items-center gap-1 text-[13px] text-muted-foreground">
-                <GitBranch className="size-3.5" /> main
-              </span>
-              <span className="hidden items-center gap-1.5 text-[13px] text-muted-foreground sm:flex">
-                <span className="size-1.5 rounded-full bg-success" /> opencode running
-              </span>
-
-              <div className="ms-auto flex items-center gap-1">
-                <div className="flex rounded-control bg-muted p-0.5">
-                  {(["terminal", "preview", "diff"] as TabType[]).map((type) => {
-                    const meta = TAB_META[type];
-                    const Icon = meta.icon;
-                    const tab = tabs.find((t) => t.type === type);
-                    const isActive = !!tab && tab.id === activeTabId && !rightCollapsed;
-                    return (
-                      <button
-                        key={type}
-                        onClick={() => ensureTab(type)}
-                        className={cn(
-                          "inline-flex items-center gap-1.5 rounded-[0.375rem] px-2 py-1 text-xs font-medium transition-colors",
-                          isActive ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        <Icon className="size-3.5" /> {meta.label}
-                        {type === "terminal" && terminalLive && (
-                          <span className="size-1.5 rounded-full bg-success animate-status-pulse" title="shell attached" />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+          {route === "usage" ? (
+            <UsageView
+              onBack={() => navigate("chat")}
+              onToggleLeft={toggleLeft}
+              leftCollapsed={leftCollapsed}
+            />
+          ) : (
+            <div className="flex h-full min-w-0 flex-col">
+              <div className="flex h-[52px] shrink-0 items-center gap-2 px-3">
                 <button
-                  onClick={() => (rightCollapsed ? expandRight() : closeRight())}
-                  title={rightCollapsed ? "Expand right panel" : "Collapse right panel"}
-                  className="ms-1 rounded-control p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  onClick={toggleLeft}
+                  title={leftCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                  className="rounded-control p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 >
-                  {rightCollapsed ? <PanelRightOpen className="size-4" /> : <PanelRightClose className="size-4" />}
+                  {leftCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
                 </button>
+
+                <span className="rounded-control bg-muted px-2 py-1 font-mono text-[11px] text-foreground">kusal/harness</span>
+                <span className="flex items-center gap-1 text-[13px] text-muted-foreground">
+                  <GitBranch className="size-3.5" /> main
+                </span>
+                <span className="hidden items-center gap-1.5 text-[13px] text-muted-foreground sm:flex">
+                  <span className="size-1.5 rounded-full bg-success" /> opencode running
+                </span>
+
+                <div className="ms-auto flex items-center gap-1">
+                  <div className="flex rounded-control bg-muted p-0.5">
+                    {(["terminal", "preview", "diff"] as TabType[]).map((type) => {
+                      const meta = TAB_META[type];
+                      const Icon = meta.icon;
+                      const tab = tabs.find((t) => t.type === type);
+                      const isActive = !!tab && tab.id === activeTabId && !rightCollapsed;
+                      return (
+                        <button
+                          key={type}
+                          onClick={() => ensureTab(type)}
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded-[0.375rem] px-2 py-1 text-xs font-medium transition-colors",
+                            isActive ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          <Icon className="size-3.5" /> {meta.label}
+                          {type === "terminal" && terminalLive && (
+                            <span className="size-1.5 rounded-full bg-success animate-status-pulse" title="shell attached" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={() => (rightCollapsed ? expandRight() : closeRight())}
+                    title={rightCollapsed ? "Expand right panel" : "Collapse right panel"}
+                    className="ms-1 rounded-control p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    {rightCollapsed ? <PanelRightOpen className="size-4" /> : <PanelRightClose className="size-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex min-h-0 flex-1 flex-col">
+                <ChatView
+                  sessionId={activeId}
+                  onSessionCreated={onSessionCreated}
+                  project={draftProject}
+                  projects={projects}
+                  onSelectProject={startDraftIn}
+                  onAddProject={() => setPickerOpen(true)}
+                  cwd={activeCwd || draftProject?.path || ""}
+                />
               </div>
             </div>
-
-            <div className="flex min-h-0 flex-1 flex-col">
-              <ChatView
-                sessionId={activeId}
-                onSessionCreated={onSessionCreated}
-                project={draftProject}
-                projects={projects}
-                onSelectProject={startDraftIn}
-                onAddProject={() => setPickerOpen(true)}
-                cwd={activeCwd || draftProject?.path || ""}
-              />
-            </div>
-          </div>
+          )}
         </ResizablePanel>
 
         <ResizableHandle className={rightCollapsed ? "hidden" : ""} />

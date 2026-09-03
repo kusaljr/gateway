@@ -513,3 +513,74 @@ export function ocMessageToChatMsg(m: OCMessage): ChatMsg {
 export async function abortSession(sessionId: string, directory?: string): Promise<void> {
   await fetch(ocUrl(`/session/${sessionId}/abort`, directory), { method: "POST" });
 }
+
+// ── usage telemetry ────────────────────────────────────────────────────────
+// Device-wide token and cost metrics collected across opencode and all CLI
+// agents (Claude Code, Codex, Copilot CLI, Gemini CLI/Antigravity).
+
+export type UsageTokens = {
+  input: number;
+  output: number;
+  reasoning: number;
+  cache_read: number;
+  cache_write: number;
+  total: number;
+};
+
+export type UsageDay = {
+  date: string;
+  tokens: UsageTokens;
+  cost: number;
+  messages: number;
+  unpriced_messages: number;
+};
+
+export type UsageProvider = {
+  provider: string;
+  tokens: UsageTokens;
+  cost: number;
+  messages: number;
+  models: number;
+  priced?: boolean;
+};
+
+export type UsageUnmetered = { provider: string; reason: string };
+
+export type UsageModel = {
+  key: string;
+  provider: string;
+  model: string;
+  tokens: UsageTokens;
+  cost: number;
+  messages: number;
+};
+
+export type Usage = {
+  hostname: string;
+  from: string;
+  to: string;
+  days: UsageDay[];
+  providers: UsageProvider[];
+  models: UsageModel[];
+  tokens: UsageTokens;
+  cost: number;
+  messages: number;
+  unpriced_messages: number;
+  sessions_scanned: number;
+  unmetered?: UsageUnmetered[];
+  opencode_error?: string;
+  source?: string;
+};
+
+export async function fetchUsage(days = 14): Promise<Usage> {
+  const r = await fetch(`/api/usage?days=${days}`);
+  if (!r.ok) {
+    if (r.status === 404) {
+      throw new Error("This device runs an older kusal build with no /api/usage. Update it there (npm run install:cli) and restart kusal connect.");
+    }
+    const text = await r.text().catch(() => "");
+    throw new Error(text || `${r.status} ${r.statusText}`);
+  }
+  return jsonOrThrow(r);
+}
+

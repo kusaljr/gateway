@@ -26,6 +26,8 @@ import (
 	"github.com/gorilla/websocket"
 
 	"kusal/internal/agentusage"
+	"kusal/internal/auth"
+	"kusal/internal/cfapi"
 	"kusal/internal/cliagent"
 	"kusal/internal/db"
 	"kusal/internal/opencode"
@@ -463,20 +465,165 @@ func emailFromCFJWT(jwt string) string {
 	return ""
 }
 
+var (
+	devicesCacheMu      sync.Mutex
+	devicesCacheAt      time.Time
+	devicesCachePayload []byte
+)
+
 func (s *Server) handleDevices(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	devicesCacheMu.Lock()
+	if devicesCachePayload != nil && time.Since(devicesCacheAt) < 8*time.Second {
+		payload := devicesCachePayload
+		devicesCacheMu.Unlock()
+		_, _ = w.Write(payload)
+		return
+	}
+	devicesCacheMu.Unlock()
+
 	store, err := db.Open()
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
 	defer store.DB.Close()
+
 	devs, _ := store.ListDevices()
-	// ensure JSON array even if nil
 	if devs == nil {
 		devs = []db.Device{}
 	}
+
+	// Retrieve or refresh Cloudflare session token from local store
+	cfToken := store.GetKV("cf_access_token")
+	if cfToken != "" {
+		if _, err := auth.VerifyCloudflareToken(cfToken); err != nil {
+			if refresh := store.GetKV("cf_refresh_token"); refresh != "" {
+				if sess, err := auth.RefreshCloudflareSession(refresh); err == nil {
+					cfToken = sess.AccessToken
+					_ = store.SetKV("cf_access_token", sess.AccessToken)
+					if sess.RefreshToken != "" {
+						_ = store.SetKV("cf_refresh_token", sess.RefreshToken)
+					}
+					if sess.Email != "" {
+						_ = store.SetKV("cf_email", sess.Email)
+					}
+				}
+			}
+		}
+	}
+
+	if cfToken != "" {
+		accountID := store.GetKV("account_id")
+		if accountID == "" {
+			accounts, err := cfapi.ListAccounts(cfToken)
+			if err == nil && len(accounts) > 0 {
+				accountID = accounts[0].ID
+				_ = store.SetKV("account_id", accountID)
+			}
+		}
+
+		if accountID != "" {
+			tunnels, err := cfapi.ListTunnels(cfToken, accountID)
+			if err == nil {
+				byTunnelID := make(map[string]int)
+				byName := make(map[string]int)
+				for i, d := range devs {
+					if d.TunnelID != "" {
+						byTunnelID[d.TunnelID] = i
+					}
+					if d.Name != "" {
+						byName[strings.ToLower(d.Name)] = i
+					}
+				}
+
+				for _, t := range tunnels {
+					status := "disconnected"
+					if t.Status == "healthy" || len(t.Connections) > 0 {
+						status = "connected"
+					}
+					cleanName := strings.TrimPrefix(t.Name, "kusal-")
+					cleanNameLower := strings.ToLower(cleanName)
+
+					matchIdx := -1
+					if idx, ok := byTunnelID[t.ID]; ok {
+						matchIdx = idx
+					} else if idx, ok := byName[cleanNameLower]; ok {
+						matchIdx = idx
+					}
+
+					if matchIdx >= 0 {
+						devs[matchIdx].Status = status
+						if devs[matchIdx].TunnelID == "" {
+							devs[matchIdx].TunnelID = t.ID
+						}
+						if devs[matchIdx].Hostname == "" {
+							if hostnames, err := cfapi.GetTunnelHostnames(cfToken, accountID, t.ID); err == nil && len(hostnames) > 0 {
+								devs[matchIdx].Hostname = hostnames[0]
+							}
+						}
+						if t.ConnsActiveAt != "" {
+							if ts, err := time.Parse(time.RFC3339, t.ConnsActiveAt); err == nil {
+								devs[matchIdx].LastSeen = ts
+							}
+						}
+						_ = store.UpsertDevice(devs[matchIdx])
+					} else {
+						hostname := t.Name
+						if hostnames, err := cfapi.GetTunnelHostnames(cfToken, accountID, t.ID); err == nil && len(hostnames) > 0 {
+							hostname = hostnames[0]
+						}
+						lastSeen := time.Now()
+						if t.ConnsActiveAt != "" {
+							if ts, err := time.Parse(time.RFC3339, t.ConnsActiveAt); err == nil {
+								lastSeen = ts
+							}
+						}
+						createdAt := time.Now()
+						if t.CreatedAt != "" {
+							if ts, err := time.Parse(time.RFC3339, t.CreatedAt); err == nil {
+								createdAt = ts
+							}
+						}
+						newDev := db.Device{
+							ID:        t.ID,
+							Name:      cleanName,
+							Hostname:  hostname,
+							TunnelID:  t.ID,
+							AccountID: accountID,
+							Status:    status,
+							CreatedAt: createdAt,
+							LastSeen:  lastSeen,
+						}
+						_ = store.UpsertDevice(newDev)
+						devs = append(devs, newDev)
+						byTunnelID[t.ID] = len(devs) - 1
+						byName[cleanNameLower] = len(devs) - 1
+					}
+				}
+			}
+		}
+	}
+
+	sort.Slice(devs, func(i, j int) bool {
+		if (devs[i].Status == "connected") != (devs[j].Status == "connected") {
+			return devs[i].Status == "connected"
+		}
+		return devs[i].LastSeen.After(devs[j].LastSeen)
+	})
+
+	encoded, err := json.Marshal(devs)
+	if err == nil {
+		devicesCacheMu.Lock()
+		devicesCachePayload = encoded
+		devicesCacheAt = time.Now()
+		devicesCacheMu.Unlock()
+		_, _ = w.Write(encoded)
+		return
+	}
+
 	_ = json.NewEncoder(w).Encode(devs)
 }
 
@@ -1159,7 +1306,18 @@ func buildUsage(days int, oc *opencode.Usage, agentRows []agentusage.Row, unmete
 		for _, m := range oc.Models {
 			mm := model(m.Provider, m.Model)
 			mm.Tokens.addOC(m.Tokens)
-			mm.Cost += m.Cost
+			cost := m.Cost
+			if cost == 0 && m.Tokens.Total > 0 {
+				cost = agentusage.EstimateCost(m.Provider, m.Model, agentusage.Tokens{
+					Input:      m.Tokens.Input,
+					Output:     m.Tokens.Output,
+					Reasoning:  m.Tokens.Reasoning,
+					CacheRead:  m.Tokens.CacheRead,
+					CacheWrite: m.Tokens.CacheWrite,
+					Total:      m.Tokens.Total,
+				})
+			}
+			mm.Cost += cost
 			mm.Messages += m.Messages
 		}
 	}
@@ -1168,16 +1326,19 @@ func buildUsage(days int, oc *opencode.Usage, agentRows []agentusage.Row, unmete
 		t := day(r.Date)
 		t.Tokens.addAgent(r.Tokens)
 		t.Messages += r.Turns
-		// these CLIs bill through the user's own subscription and write no
-		// price, so every one of their turns is unpriced by definition
 		t.UnpricedMessages += r.Turns
 
-		pr := provider(r.Provider, false)
+		estCost := agentusage.EstimateCost(r.Provider, r.Model, r.Tokens)
+		t.Cost += estCost
+
+		pr := provider(r.Provider, true)
 		pr.Tokens.addAgent(r.Tokens)
+		pr.Cost += estCost
 		pr.Messages += r.Turns
 
 		mm := model(r.Provider, r.Model)
 		mm.Tokens.addAgent(r.Tokens)
+		mm.Cost += estCost
 		mm.Messages += r.Turns
 	}
 

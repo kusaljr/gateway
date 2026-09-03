@@ -1,5 +1,5 @@
 import {
-  Archive, ArchiveRestore, ChevronDown, ChevronRight, ClipboardCopy, Folder, GitBranch,
+  Archive, ArchiveRestore, BarChart3, ChevronDown, ChevronRight, ClipboardCopy, ExternalLink, Folder, GitBranch,
   Pencil, Plus, Search, Server, Shield, SquarePen, Terminal as TermIcon, Trash2, X,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -24,9 +24,13 @@ type Props = {
   terminalLive?: boolean;
   /** a thread left the list (deleted or archived) — clear it if it was open */
   onThreadRemoved?: (id: string) => void;
+  /** active navigation view */
+  currentView?: "chat" | "usage";
+  /** route transition callback */
+  onNavigate?: (view: "chat" | "usage") => void;
 };
 
-export function Sidebar({ activeId, onSelect, refreshSignal = 0, onNewThread, onNewThreadIn, terminalLive = false, onThreadRemoved }: Props) {
+export function Sidebar({ activeId, onSelect, refreshSignal = 0, onNewThread, onNewThreadIn, terminalLive = false, onThreadRemoved, currentView = "chat", onNavigate }: Props) {
   const [devices, setDevices] = useState<Awaited<ReturnType<typeof fetchDevices>>>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [q, setQ] = useState("");
@@ -189,28 +193,55 @@ export function Sidebar({ activeId, onSelect, refreshSignal = 0, onNewThread, on
       return next;
     });
 
+  const handleSelect = useCallback(
+    (id: string) => {
+      onNavigate?.("chat");
+      onSelect(id);
+    },
+    [onNavigate, onSelect],
+  );
+
+  const handleNewThread = useCallback(() => {
+    onNavigate?.("chat");
+    onNewThread?.();
+  }, [onNavigate, onNewThread]);
+
+  const handleNewThreadIn = useCallback(
+    (cwd: string) => {
+      onNavigate?.("chat");
+      onNewThreadIn?.(cwd);
+    },
+    [onNavigate, onNewThreadIn],
+  );
+
   const connected = devices.filter((d) => d.status === "connected").length;
   const workingTotal = liveSessions.filter((s) => s.status === "working").length;
 
   return (
     <div className="flex h-full w-full min-w-0 flex-col border-e border-border bg-sidebar">
       <div className="flex h-[52px] shrink-0 items-center gap-2 px-3">
-        <div className="flex size-6 items-center justify-center rounded-md bg-primary text-[11px] font-semibold text-primary-foreground">K</div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium leading-tight text-foreground">kusal</div>
-          <div className="flex items-center gap-1.5 truncate text-[11px] leading-tight text-muted-foreground">
-            {workingTotal > 0 ? (
-              <>
-                <span className="size-1.5 shrink-0 rounded-full bg-info animate-status-pulse" />
-                {workingTotal} working
-              </>
-            ) : (
-              "tunnel sessions"
-            )}
-          </div>
-        </div>
         <button
-          onClick={onNewThread}
+          onClick={() => onNavigate?.("chat")}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-control text-left transition-opacity hover:opacity-80"
+          title="Home / Chat"
+        >
+          <div className="flex size-6 items-center justify-center rounded-md bg-primary text-[11px] font-semibold text-primary-foreground">K</div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium leading-tight text-foreground">kusal</div>
+            <div className="flex items-center gap-1.5 truncate text-[11px] leading-tight text-muted-foreground">
+              {workingTotal > 0 ? (
+                <>
+                  <span className="size-1.5 shrink-0 rounded-full bg-info animate-status-pulse" />
+                  {workingTotal} working
+                </>
+              ) : (
+                "tunnel sessions"
+              )}
+            </div>
+          </div>
+        </button>
+        <button
+          onClick={handleNewThread}
           title="New thread  (⌘K)"
           className="inline-flex size-7 shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           aria-label="New thread"
@@ -251,14 +282,31 @@ export function Sidebar({ activeId, onSelect, refreshSignal = 0, onNewThread, on
         )}
         {sections.devices && devices.map((d) => {
           const isConnected = d.status === "connected";
+          const isCurrent = typeof window !== "undefined" && (d.hostname === window.location.hostname || (d.hostname.includes("localhost") && window.location.hostname === "localhost"));
+          const isRemote = isConnected && d.hostname && !isCurrent && d.hostname.includes(".");
+
           return (
             <div
               key={d.id}
               title={`${d.name} (${d.hostname}) · ${d.status} · tunnel ${d.tunnel_id} · last seen ${d.last_seen}`}
-              className="flex items-center gap-2 rounded-control px-2.5 py-1.5 transition-colors hover:bg-sidebar-row-hover"
+              className="group flex items-center gap-2 rounded-control px-2.5 py-1.5 transition-colors hover:bg-sidebar-row-hover"
             >
               <span className={cn("size-1.5 shrink-0 rounded-full", isConnected ? "bg-success animate-status-pulse" : "bg-border")} />
-              <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{d.name || d.id.slice(0, 8)}</span>
+              <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
+                {d.name || d.id.slice(0, 8)}
+                {isCurrent && <span className="ms-1 text-[10px] text-muted-foreground font-normal">(this device)</span>}
+              </span>
+              {isRemote && (
+                <a
+                  href={`https://${d.hostname}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={`Open https://${d.hostname}`}
+                  className="hidden rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground group-hover:inline-flex"
+                >
+                  <ExternalLink className="size-3" />
+                </a>
+              )}
               <span className={cn("shrink-0 text-[11px] tabular-nums", isConnected ? "text-success-foreground" : "text-muted-foreground")}>
                 {isConnected ? relativeTime(d.last_seen) : d.status}
               </span>
@@ -288,8 +336,8 @@ export function Sidebar({ activeId, onSelect, refreshSignal = 0, onNewThread, on
               isOpen={isOpen}
               onToggle={toggle}
               activeId={activeId}
-              onSelect={onSelect}
-              {...(onNewThreadIn ? { onNewThreadIn } : {})}
+              onSelect={handleSelect}
+              {...(handleNewThreadIn ? { onNewThreadIn: handleNewThreadIn } : {})}
               terminalLive={terminalLive}
               onContextMenu={(session, x, y) => setMenu({ session, x, y })}
               renamingId={renamingId}
@@ -317,7 +365,7 @@ export function Sidebar({ activeId, onSelect, refreshSignal = 0, onNewThread, on
                     key={s.id}
                     s={s}
                     active={s.id === activeId}
-                    onSelect={onSelect}
+                    onSelect={handleSelect}
                     terminalLive={terminalLive}
                     onContextMenu={(session, x, y) => setMenu({ session, x, y })}
                     renamingId={renamingId}
@@ -332,6 +380,21 @@ export function Sidebar({ activeId, onSelect, refreshSignal = 0, onNewThread, on
       </div>
 
       <div className="shrink-0 border-t border-border p-2">
+        <button
+          onClick={() => onNavigate?.("usage")}
+          title="Usage & Telemetry"
+          className={cn(
+            "mb-1 flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-[12px] font-medium transition-colors",
+            currentView === "usage"
+              ? "bg-sidebar-row-selected text-foreground shadow-sm ring-1 ring-border"
+              : "text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground",
+          )}
+        >
+          <BarChart3 className={cn("size-3.5 shrink-0", currentView === "usage" ? "text-orange-600" : "text-muted-foreground")} />
+          <span className="min-w-0 flex-1 truncate text-left">Usage</span>
+          <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">/usage</span>
+        </button>
+
         <div
           className="mb-1 flex items-center gap-2 rounded-control px-2 py-1.5 text-[11px]"
           title={terminalLive ? "Shell attached over the tunnel" : "No shell attached — open a Terminal tab"}

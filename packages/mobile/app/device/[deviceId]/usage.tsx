@@ -10,7 +10,7 @@ import { MONO_FONT } from "../../../lib/fonts";
 import { useSession } from "../../../lib/session";
 import { fetchUsage, type Usage } from "../../../lib/api";
 
-const WINDOWS = [7, 14, 30];
+const WINDOWS = [1, 7, 14, 30];
 // A busy machine easily runs a dozen models in a fortnight — show the ones that
 // actually moved the number and keep the rest one tap away.
 const MODEL_PREVIEW = 5;
@@ -88,7 +88,7 @@ export default function UsageScreen() {
         <View className="mx-auto w-full max-w-md">
           <Text className="text-xl font-bold text-zinc-900" numberOfLines={1}>{deviceLabel}</Text>
           <Text style={{ fontFamily: MONO_FONT }} className="mt-1 text-[11px] text-zinc-400" numberOfLines={1}>
-            {usage ? `${usage.from} → ${usage.to}` : "—"}
+            {usage ? (days === 1 ? `Today (${usage.to})` : `${usage.from} → ${usage.to}`) : "—"}
           </Text>
 
           <View className="mt-3 flex-row gap-1.5">
@@ -98,7 +98,7 @@ export default function UsageScreen() {
                 onPress={() => setDays(w)}
                 className={`rounded-full border px-3 py-1 ${days === w ? "border-zinc-900 bg-zinc-900" : "border-zinc-200 bg-white"}`}
               >
-                <Text className={`text-[11px] font-medium ${days === w ? "text-white" : "text-zinc-600"}`}>{w}d</Text>
+                <Text className={`text-[11px] font-medium ${days === w ? "text-white" : "text-zinc-600"}`}>{w === 1 ? "Today" : `${w}d`}</Text>
               </Pressable>
             ))}
           </View>
